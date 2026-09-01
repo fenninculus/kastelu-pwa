@@ -411,11 +411,36 @@ export default function App() {
     if (pending.length === 0) return;
     const latest = pending[pending.length - 1];
     try {
-      const base = fullDataRef.current || {};
-      const data = { ...base, plants: latest.plants, exportedAt: new Date().toISOString() };
+      const remote = await readPlantData();
+      const localMap = Object.fromEntries(
+        latest.plants.map(p => [p.id || p.name, p])
+      );
+      const mergedPlants = (remote.plants || []).map(rp => {
+        const id = rp.id || rp.name;
+        const local = localMap[id];
+        if (!local) return rp;
+        const localWatered = local.lastWatered || local.watering?.lastWatered;
+        const remoteWatered = rp.lastWatered || rp.watering?.lastWatered;
+        const localFed = local.lastFert || local.feeding?.lastFed;
+        const remoteFed = rp.lastFert || rp.feeding?.lastFed;
+        if ((localWatered && (!remoteWatered || localWatered > remoteWatered)) ||
+            (localFed && (!remoteFed || localFed > remoteFed))) {
+          const out = { ...local };
+          delete out._normalized;
+          if (out.watering) out.watering = { ...out.watering, lastWatered: out.lastWatered || out.watering.lastWatered };
+          if (out.feeding) out.feeding = { ...out.feeding, lastFed: out.lastFert || out.feeding.lastFed };
+          return out;
+        }
+        return rp;
+      });
+      const data = { ...remote, plants: mergedPlants, exportedAt: new Date().toISOString() };
       await writePlantData(data);
       setFullData(data);
+      const allPlants = mergedPlants.map(normalizePlant);
+      setPlants(allPlants);
+      await savePlants(allPlants);
       await clearPendingChanges();
+      try { lastModifiedRef.current = await getFileModifiedTime(); } catch {}
       setError(null);
       const now = new Date();
       setLastSync(now);
@@ -440,21 +465,8 @@ export default function App() {
     }
   };
 
-  const preparePlantsForDrive = (plantList) =>
-    plantList.map(p => {
-      const out = { ...p };
-      if (out.watering) {
-        out.watering = { ...out.watering, lastWatered: out.lastWatered || out.watering.lastWatered };
-      }
-      if (out.feeding) {
-        out.feeding = { ...out.feeding, lastFed: out.lastFert || out.feeding.lastFed };
-      }
-      delete out._normalized;
-      return out;
-    });
-
-  const writeToDrive = async (updatedPlants) => {
-    console.log('[Drive] writeToDrive called, online:', navigator.onLine, 'plants:', updatedPlants.length);
+  const writeToDrive = async (updatedPlants, changedIds) => {
+    console.log('[Drive] writeToDrive called, online:', navigator.onLine, 'changed:', changedIds);
     if (!navigator.onLine) {
       console.log('[Drive] Offline — queuing change');
       await addPendingChange({ timestamp: Date.now(), plants: updatedPlants });
@@ -462,15 +474,30 @@ export default function App() {
       return;
     }
     try {
-      const base = fullDataRef.current || {};
-      const exportPlants = preparePlantsForDrive(updatedPlants);
-      const data = { ...base, plants: exportPlants, exportedAt: new Date().toISOString() };
-      console.log('[Drive] Writing to Drive...', Object.keys(data));
+      const remote = await readPlantData();
+      const changedMap = Object.fromEntries(
+        updatedPlants.filter(p => changedIds.includes(p.id)).map(p => [p.id, p])
+      );
+      const mergedPlants = (remote.plants || []).map(rp => {
+        const id = rp.id || rp.name;
+        if (changedMap[id]) {
+          const out = { ...changedMap[id] };
+          delete out._normalized;
+          if (out.watering) out.watering = { ...out.watering, lastWatered: out.lastWatered || out.watering.lastWatered };
+          if (out.feeding) out.feeding = { ...out.feeding, lastFed: out.lastFert || out.feeding.lastFed };
+          return out;
+        }
+        return rp;
+      });
+      const data = { ...remote, plants: mergedPlants, exportedAt: new Date().toISOString() };
+      console.log('[Drive] Writing merged data to Drive...');
       await writePlantData(data);
       console.log('[Drive] Write succeeded');
       setFullData(data);
+      const allPlants = mergedPlants.map(normalizePlant);
+      setPlants(allPlants);
+      await savePlants(allPlants);
       try { lastModifiedRef.current = await getFileModifiedTime(); } catch {}
-
       setError(null);
       const now = new Date();
       setLastSync(now);
@@ -495,7 +522,7 @@ export default function App() {
     setSelectedPlant(updated);
     await updatePlant(updated);
     console.log('[Action] Local state updated, pushing to Drive...');
-    await writeToDrive(newPlants);
+    await writeToDrive(newPlants, [plant.id]);
     console.log('[Action] Water done');
   };
 
@@ -512,7 +539,7 @@ export default function App() {
     setSelectedPlant(updated);
     await updatePlant(updated);
     console.log('[Action] Local state updated, pushing to Drive...');
-    await writeToDrive(newPlants);
+    await writeToDrive(newPlants, [plant.id]);
     console.log('[Action] Feed done');
   };
 
@@ -529,7 +556,7 @@ export default function App() {
     setPlants(newPlants);
     setSelectedPlant(updated);
     await updatePlant(updated);
-    await writeToDrive(newPlants);
+    await writeToDrive(newPlants, [plant.id]);
   };
 
   const undoFeed = async (plant) => {
@@ -545,7 +572,7 @@ export default function App() {
     setPlants(newPlants);
     setSelectedPlant(updated);
     await updatePlant(updated);
-    await writeToDrive(newPlants);
+    await writeToDrive(newPlants, [plant.id]);
   };
 
   // Poll Drive for external changes every 30s
