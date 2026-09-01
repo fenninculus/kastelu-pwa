@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="96" fill="#EDF1EA"/>
+  <g transform="translate(256,280)">
+    <!-- Water droplet -->
+    <path d="M-10,-120 C-10,-120 -70,0 -70,50 C-70,83 -43,110 -10,110 C23,110 50,83 50,50 C50,0 -10,-120 -10,-120Z" fill="#5B8FA3" opacity="0.9"/>
+    <!-- Leaf -->
+    <path d="M10,-60 C10,-60 80,-40 100,20 C120,80 80,110 40,100 C40,100 70,60 50,10 C30,-40 10,-60 10,-60Z" fill="#6B8F4E" opacity="0.9"/>
+    <!-- Leaf vein -->
+    <path d="M20,-40 C35,-10 55,30 42,85" stroke="#EDF1EA" stroke-width="3" fill="none" opacity="0.6"/>
+  </g>
+</svg>
