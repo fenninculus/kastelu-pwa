@@ -398,6 +398,34 @@ export default function App() {
       setAuthed(true);
       await clearPendingChanges();
       try { lastModifiedRef.current = await getFileModifiedTime(); } catch {}
+
+      // One-time fix: staghorn fern dates (2026-09-01)
+      const fixKey = 'fix:staghorn-2026-09-01';
+      if (!await getMeta(fixKey)) {
+        try {
+          const fresh = await readPlantData();
+          const fixed = (fresh.plants || []).map(p => {
+            const name = p.name || p.id;
+            if (name === 'Staghorn fern') {
+              const out = { ...p };
+              out.lastWatered = '2026-08-26T12:00:00.000Z';
+              out.lastFert = '2026-08-19T12:00:00.000Z';
+              if (out.watering) out.watering = { ...out.watering, lastWatered: '2026-08-26T12:00:00.000Z' };
+              if (out.feeding) out.feeding = { ...out.feeding, lastFed: '2026-08-19T12:00:00.000Z' };
+              console.log('[Fix] Patched Staghorn fern dates');
+              return out;
+            }
+            return p;
+          });
+          await writePlantData({ ...fresh, plants: fixed, exportedAt: new Date().toISOString() });
+          await setMeta(fixKey, true);
+          const fixedList = fixed.map(normalizePlant);
+          setPlants(fixedList);
+          await savePlants(fixedList);
+          try { lastModifiedRef.current = await getFileModifiedTime(); } catch {}
+        } catch (e) { console.warn('[Fix] staghorn fix failed:', e); }
+      }
+
     } catch (e) {
       console.error('Sync failed:', e);
       setError(e.message);
