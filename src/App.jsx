@@ -5,7 +5,7 @@ import {
   addPendingChange, getPendingChanges, clearPendingChanges,
 } from './db.js';
 import {
-  initAuth, requestToken, clearToken,
+  initAuth, requestToken, clearToken, hasToken,
   readPlantData, writePlantData, getFileModifiedTime,
 } from './drive.js';
 
@@ -355,6 +355,7 @@ export default function App() {
   const [error, setError] = useState(null);
   const touchStartY = useRef(0);
   const pullRef = useRef(null);
+  const lastModifiedRef = useRef(null);
 
   useEffect(() => {
     const on = () => setOnline(true);
@@ -392,6 +393,7 @@ export default function App() {
       setLastSync(now);
       await setMeta('lastSync', now.toISOString());
       setAuthed(true);
+      try { lastModifiedRef.current = await getFileModifiedTime(); } catch {}
     } catch (e) {
       console.error('Sync failed:', e);
       setError(e.message);
@@ -467,6 +469,8 @@ export default function App() {
       await writePlantData(data);
       console.log('[Drive] Write succeeded');
       setFullData(data);
+      try { lastModifiedRef.current = await getFileModifiedTime(); } catch {}
+
       setError(null);
       const now = new Date();
       setLastSync(now);
@@ -543,6 +547,47 @@ export default function App() {
     await updatePlant(updated);
     await writeToDrive(newPlants);
   };
+
+  // Poll Drive for external changes every 30s
+  useEffect(() => {
+    if (!authed || !online) return;
+    const poll = async () => {
+      try {
+        const modTime = await getFileModifiedTime();
+        if (lastModifiedRef.current && modTime !== lastModifiedRef.current) {
+          console.log('[Poll] Drive file changed externally, re-syncing...');
+          await syncFromDrive();
+        }
+        lastModifiedRef.current = modTime;
+      } catch (e) {
+        console.warn('[Poll] modifiedTime check failed:', e.message);
+      }
+    };
+    poll();
+    const id = setInterval(poll, 30000);
+    return () => clearInterval(id);
+  }, [authed, online, syncFromDrive]);
+
+  // Re-sync when tab becomes visible again
+  useEffect(() => {
+    if (!authed) return;
+    const onVisible = async () => {
+      if (document.visibilityState === 'visible' && navigator.onLine && hasToken()) {
+        try {
+          const modTime = await getFileModifiedTime();
+          if (lastModifiedRef.current && modTime !== lastModifiedRef.current) {
+            console.log('[Visibility] Drive file changed while away, re-syncing...');
+            await syncFromDrive();
+          }
+          lastModifiedRef.current = modTime;
+        } catch (e) {
+          console.warn('[Visibility] check failed:', e.message);
+        }
+      }
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => document.removeEventListener('visibilitychange', onVisible);
+  }, [authed, syncFromDrive]);
 
   // Pull-to-refresh
   const handleTouchStart = (e) => { touchStartY.current = e.touches[0].clientY; };
