@@ -396,6 +396,7 @@ export default function App() {
       setLastSync(now);
       await setMeta('lastSync', now.toISOString());
       setAuthed(true);
+      await clearPendingChanges();
       try { lastModifiedRef.current = await getFileModifiedTime(); } catch {}
     } catch (e) {
       console.error('Sync failed:', e);
@@ -486,12 +487,18 @@ export default function App() {
         const local = changedMap[id];
         if (!local) return rp;
         const out = { ...rp };
-        out.lastWatered = local.lastWatered;
-        out.history = local.history;
-        out.lastFert = local.lastFert;
-        out.fertHistory = local.fertHistory;
-        if (out.watering) out.watering = { ...out.watering, lastWatered: local.lastWatered || out.watering.lastWatered };
-        if (out.feeding) out.feeding = { ...out.feeding, lastFed: local.lastFert || out.feeding.lastFed };
+        const remoteWatered = rp.lastWatered || rp.watering?.lastWatered || null;
+        const remoteFed = rp.lastFert || rp.feeding?.lastFed || null;
+        if (local.lastWatered && (!remoteWatered || local.lastWatered > remoteWatered)) {
+          out.lastWatered = local.lastWatered;
+          out.history = local.history;
+          if (out.watering) out.watering = { ...out.watering, lastWatered: local.lastWatered };
+        }
+        if (local.lastFert && (!remoteFed || local.lastFert > remoteFed)) {
+          out.lastFert = local.lastFert;
+          out.fertHistory = local.fertHistory;
+          if (out.feeding) out.feeding = { ...out.feeding, lastFed: local.lastFert };
+        }
         return out;
       });
       const data = { ...remote, plants: mergedPlants, exportedAt: new Date().toISOString() };
