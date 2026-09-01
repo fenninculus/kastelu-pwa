@@ -376,6 +376,9 @@ export default function App() {
       setLoading(false);
       const syncTime = await getMeta('lastSync');
       if (syncTime) setLastSync(new Date(syncTime));
+      if (ready && hasToken()) {
+        syncFromDrive();
+      }
     })();
   }, []);
 
@@ -480,14 +483,16 @@ export default function App() {
       );
       const mergedPlants = (remote.plants || []).map(rp => {
         const id = rp.id || rp.name;
-        if (changedMap[id]) {
-          const out = { ...changedMap[id] };
-          delete out._normalized;
-          if (out.watering) out.watering = { ...out.watering, lastWatered: out.lastWatered || out.watering.lastWatered };
-          if (out.feeding) out.feeding = { ...out.feeding, lastFed: out.lastFert || out.feeding.lastFed };
-          return out;
-        }
-        return rp;
+        const local = changedMap[id];
+        if (!local) return rp;
+        const out = { ...rp };
+        out.lastWatered = local.lastWatered;
+        out.history = local.history;
+        out.lastFert = local.lastFert;
+        out.fertHistory = local.fertHistory;
+        if (out.watering) out.watering = { ...out.watering, lastWatered: local.lastWatered || out.watering.lastWatered };
+        if (out.feeding) out.feeding = { ...out.feeding, lastFed: local.lastFert || out.feeding.lastFed };
+        return out;
       });
       const data = { ...remote, plants: mergedPlants, exportedAt: new Date().toISOString() };
       console.log('[Drive] Writing merged data to Drive...');

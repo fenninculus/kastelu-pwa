@@ -99,6 +99,7 @@ async function driveRequest(path, options = {}) {
   const url = path.startsWith('http') ? path : `https://www.googleapis.com/drive/v3/files/${DRIVE_FILE_ID}${path}`;
   let res = await fetch(url, {
     ...options,
+    cache: 'no-store',
     headers: {
       Authorization: `Bearer ${token}`,
       ...options.headers,
@@ -110,6 +111,7 @@ async function driveRequest(path, options = {}) {
     token = await requestToken();
     res = await fetch(url, {
       ...options,
+      cache: 'no-store',
       headers: {
         Authorization: `Bearer ${token}`,
         ...options.headers,
