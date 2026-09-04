@@ -8,66 +8,15 @@ import {
   initAuth, requestToken, clearToken, hasToken,
   readPlantData, writePlantData, getFileModifiedTime,
 } from './drive.js';
+import {
+  C, FONT_DISPLAY,
+  waterStatus, fertStatus, compareByUrgency, locationGroup,
+  daysSince, relDay, fmtDate,
+  conditionsSummary, fertRotationPreview, buildUnifiedHistory, formatHistoryEntry,
+  WaterGauge, Chip, StatusBadge, GroupPills,
+} from './kastelu-ui.jsx';
 
-const C = {
-  bg: '#EDF1EA',
-  text: '#2D3A2E',
-  muted: '#7A8A7C',
-  water: '#5B8FA3',
-  feed: '#6B8F4E',
-  overdue: '#C4673C',
-  line: '#D5DDD1',
-  card: '#FFFFFF',
-  cardShadow: '0 1px 3px rgba(45,58,46,0.08)',
-};
-
-function daysSince(dateStr) {
-  if (!dateStr) return Infinity;
-  const d = new Date(dateStr);
-  if (isNaN(d)) return Infinity;
-  d.setHours(0, 0, 0, 0);
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  return Math.round((today.getTime() - d.getTime()) / 86400000);
-}
-
-function waterStatus(plant) {
-  const days = daysSince(plant.lastWatered);
-  const interval = plant.adjustedInterval || plant.baseInterval || 7;
-  if (days === Infinity) return { days: null, status: 'unknown', daysLeft: null };
-  const daysLeft = interval - days;
-  if (daysLeft < -1) return { days, status: 'overdue', daysLeft };
-  if (daysLeft <= 1) return { days, status: 'due', daysLeft };
-  return { days, status: 'ok', daysLeft };
-}
-
-function isWinterPause() {
-  const m = new Date().getMonth();
-  return m >= 10 || m <= 1; // Nov–Feb
-}
-
-function fertStatus(plant) {
-  if (!plant.fertInterval) return { days: null, status: 'none', daysLeft: null };
-  if (plant.fertWinterPause && isWinterPause()) return { days: daysSince(plant.lastFert), status: 'paused', daysLeft: null };
-  const days = daysSince(plant.lastFert);
-  const daysLeft = plant.fertInterval - days;
-  if (days === Infinity) return { days: null, status: 'unknown', daysLeft: null };
-  if (daysLeft < -1) return { days, status: 'overdue', daysLeft };
-  if (daysLeft <= 1) return { days, status: 'due', daysLeft };
-  return { days, status: 'ok', daysLeft };
-}
-
-function urgencyScore(plant) {
-  const ws = waterStatus(plant);
-  const fs = fertStatus(plant);
-  let score = 0;
-  if (ws.status === 'overdue') score += 100 + Math.abs(ws.daysLeft || 0);
-  else if (ws.status === 'due') score += 50;
-  else if (ws.status === 'ok') score += -ws.daysLeft;
-  if (fs.status === 'overdue') score += 30;
-  else if (fs.status === 'due') score += 15;
-  return score;
-}
+const CARD_SHADOW = '0 1px 3px rgba(34,48,31,0.08)';
 
 function normalizePlant(p) {
   if (p._normalized) return p;
@@ -83,39 +32,25 @@ function normalizePlant(p) {
     fertInterval: p.fertInterval ?? p.feeding?.intervalDays ?? 0,
     fertWinterPause: p.fertWinterPause ?? p.feeding?.winterPause ?? true,
     fertNote: p.fertNote || p.feeding?.fertNote || '',
+    botanical: p.botanical || '',
     notes: p.notes || p.care?.notes || '',
-    conditions: p.conditions?.light
-      ? p.conditions
-      : {
-          light: p.care?.light || '',
-          humidity: p.care?.humidity || '',
-          temperature: p.conditions?.temperature || '',
-          medium: p.conditions?.medium || '',
-        },
+    // Keep the Mac app's two shapes apart: `conditions` is the pot (size,
+    // material, medium, placement); light and humidity are care text. Folding
+    // them together lost the pot details entirely.
+    conditions: p.conditions || null,
+    light: p.light || p.care?.light || '',
+    humidity: p.humidity || p.care?.humidity || '',
+    wateringMethod: p.wateringMethod || p.watering?.wateringMethod || '',
+    groups: p.groups || [],
+    lifecycle: p.lifecycle || 'active',
     _normalized: true,
   };
-}
-
-function StatusDot({ status }) {
-  const color = status === 'overdue' ? C.overdue : status === 'due' ? '#D4A843' : C.feed;
-  return (
-    <span style={{
-      display: 'inline-block', width: 8, height: 8, borderRadius: '50%',
-      backgroundColor: color, marginRight: 6, flexShrink: 0,
-    }} />
-  );
-}
-
-function formatDate(dateStr) {
-  if (!dateStr) return '—';
-  const d = new Date(dateStr);
-  if (isNaN(d)) return '—';
-  return d.toLocaleDateString('fi-FI', { day: 'numeric', month: 'numeric' });
 }
 
 function PlantCard({ plant, onTap }) {
   const ws = waterStatus(plant);
   const fs = fertStatus(plant);
+  const lc = plant.lifecycle || 'active';
 
   return (
     <button
@@ -123,51 +58,53 @@ function PlantCard({ plant, onTap }) {
       style={{
         display: 'flex', alignItems: 'center', gap: 12,
         width: '100%', padding: '14px 16px',
-        background: C.card, border: 'none', borderRadius: 12,
-        boxShadow: C.cardShadow, cursor: 'pointer',
-        textAlign: 'left', fontFamily: 'inherit', color: C.text,
+        background: C.card,
+        border: `1px solid ${ws.tone === 'overdue' ? C.rust + '55' : C.line}`,
+        borderRadius: 14,
+        boxShadow: CARD_SHADOW, cursor: 'pointer',
+        textAlign: 'left', fontFamily: 'inherit', color: C.ink,
         WebkitAppearance: 'none',
       }}
     >
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{
-          fontFamily: "'Fraunces', serif", fontWeight: 600, fontSize: 15,
-          whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-        }}>
+        <div style={{ fontFamily: FONT_DISPLAY, fontSize: 17, color: C.ink }}>
           {plant.name}
-        </div>
-        <div style={{ fontSize: 12, color: C.muted, marginTop: 2 }}>
-          {plant.species !== plant.name ? plant.species : ''}
-        </div>
-      </div>
-
-      <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexShrink: 0 }}>
-        <div style={{ textAlign: 'center', minWidth: 44 }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <StatusDot status={ws.status} />
-            <span style={{ fontSize: 13, fontWeight: 600, color: ws.status === 'overdue' ? C.overdue : C.text }}>
-              {ws.days != null ? `${ws.days}d` : '?'}
+          {plant.botanical && plant.botanical !== plant.name && (
+            <span style={{ fontSize: 12, color: C.muted, marginLeft: 6, fontStyle: 'italic' }}>
+              {plant.botanical}
             </span>
-          </div>
-          <div style={{ fontSize: 10, color: C.muted }}>water</div>
+          )}
         </div>
 
-        {fs.status !== 'none' && (
-          <div style={{ textAlign: 'center', minWidth: 44 }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <StatusDot status={fs.status === 'paused' ? 'ok' : fs.status} />
-              <span style={{ fontSize: 13, fontWeight: 600, color: fs.status === 'overdue' ? C.overdue : C.text }}>
-                {fs.status === 'paused' ? '❄' : fs.days != null ? `${fs.days}d` : '?'}
-              </span>
-            </div>
-            <div style={{ fontSize: 10, color: C.muted }}>feed</div>
-          </div>
-        )}
+        <div style={{ display: 'flex', gap: 6, marginTop: 4, flexWrap: 'wrap' }}>
+          <StatusBadge status={ws} />
+          {fs && (
+            <Chip bg={fs.due ? C.feedPale : C.card} fg={fs.due ? C.feed : C.muted}>
+              {fs.due ? '🌱 ' : ''}{fs.label}
+            </Chip>
+          )}
+          {lc !== 'active' && (
+            <Chip bg={lc === 'rest' ? C.feedPale : C.track} fg={lc === 'rest' ? C.feed : C.muted}>
+              {lc === 'rest' ? 'Resting' : 'Dormant'}
+            </Chip>
+          )}
+        </div>
 
-        <svg width="16" height="16" viewBox="0 0 16 16" style={{ opacity: 0.3 }}>
-          <path d="M6 3l5 5-5 5" stroke={C.text} strokeWidth="1.5" fill="none" strokeLinecap="round" />
-        </svg>
+        <div style={{ margin: '10px 0 8px' }}>
+          <WaterGauge fill={ws.fill} tone={ws.tone} />
+        </div>
+
+        <div style={{ fontSize: 12.5, color: C.muted }}>
+          {plant.lastWatered
+            ? `Last watered ${relDay(plant.lastWatered)} · every ${ws.interval} d`
+            : `Every ${ws.interval} d · no waterings logged yet`}
+        </div>
+        <GroupPills groups={plant.groups} />
       </div>
+
+      <svg width="16" height="16" viewBox="0 0 16 16" style={{ opacity: 0.3, flexShrink: 0 }}>
+        <path d="M6 3l5 5-5 5" stroke={C.ink} strokeWidth="1.5" fill="none" strokeLinecap="round" />
+      </svg>
     </button>
   );
 }
@@ -175,10 +112,31 @@ function PlantCard({ plant, onTap }) {
 function PlantDetail({ plant, onBack, onWater, onFeed, onUndoWater, onUndoFeed }) {
   const ws = waterStatus(plant);
   const fs = fertStatus(plant);
-  const interval = plant.adjustedInterval || plant.baseInterval || 7;
+  const lc = plant.lifecycle || 'active';
+  const wateredToday = daysSince(plant.lastWatered) === 0;
+  const fedToday = daysSince(plant.lastFert) === 0;
+  const rotPreview = fertRotationPreview(plant);
+  const historyEntries = buildUnifiedHistory(plant);
+  const potSummary = conditionsSummary(plant.conditions);
 
-  const waterHistory = (plant.history || []).slice(-10).reverse();
-  const feedHistory = (plant.fertHistory || []).slice(-10).reverse();
+  const panel = {
+    background: C.card, border: `1px solid ${C.line}`, borderRadius: 14,
+    padding: 16, marginBottom: 14,
+  };
+  const smallBtn = {
+    flex: 1, padding: '11px 0', borderRadius: 8, border: `1px solid ${C.line}`,
+    background: 'transparent', color: C.muted, fontSize: 13,
+    fontFamily: 'inherit', cursor: 'pointer',
+  };
+  const infoRow = (label, value) =>
+    value ? (
+      <div style={{ marginBottom: 10 }}>
+        <div style={{ fontSize: 11, fontWeight: 700, color: C.muted, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+          {label}
+        </div>
+        <div style={{ fontSize: 14, color: C.ink, lineHeight: 1.45 }}>{value}</div>
+      </div>
+    ) : null;
 
   return (
     <div style={{ padding: '0 16px 100px', paddingTop: 'env(safe-area-inset-top, 0px)' }}>
@@ -193,136 +151,131 @@ function PlantDetail({ plant, onBack, onWater, onFeed, onUndoWater, onUndoFeed }
         Back
       </button>
 
-      <h1 style={{ fontFamily: "'Fraunces', serif", fontSize: 24, fontWeight: 700, margin: '0 0 4px' }}>
+      <h1 style={{ fontFamily: FONT_DISPLAY, fontSize: 26, fontWeight: 600, margin: '0 0 4px', color: C.ink }}>
         {plant.name}
       </h1>
-      {plant.species !== plant.name && (
-        <p style={{ color: C.muted, fontSize: 14, margin: '0 0 4px' }}>{plant.species}</p>
+      {plant.botanical && plant.botanical !== plant.name && (
+        <p style={{ color: C.muted, fontSize: 14, margin: '0 0 4px', fontStyle: 'italic' }}>{plant.botanical}</p>
       )}
-      <p style={{ color: C.muted, fontSize: 13, margin: '0 0 20px' }}>{plant.location}</p>
+      <p style={{ color: C.muted, fontSize: 13, margin: '0 0 12px' }}>{plant.location}</p>
 
-      {/* Status cards */}
-      <div style={{ display: 'flex', gap: 12, marginBottom: 20 }}>
-        <div style={{
-          flex: 1, background: C.card, borderRadius: 12, padding: 16,
-          boxShadow: C.cardShadow, textAlign: 'center',
-        }}>
-          <div style={{ fontSize: 11, color: C.muted, marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Water</div>
-          <div style={{
-            fontSize: 28, fontWeight: 700, fontFamily: "'Fraunces', serif",
-            color: ws.status === 'overdue' ? C.overdue : ws.status === 'due' ? '#D4A843' : C.water,
-          }}>
-            {ws.days != null ? ws.days : '?'}
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 12 }}>
+        <StatusBadge status={ws} />
+        {fs && (
+          <Chip bg={fs.due ? C.feedPale : C.card} fg={fs.due ? C.feed : C.muted}>
+            {fs.due ? '🌱 ' : ''}{fs.label}
+          </Chip>
+        )}
+        {lc !== 'active' && (
+          <Chip bg={lc === 'rest' ? C.feedPale : C.track} fg={lc === 'rest' ? C.feed : C.muted}>
+            {lc === 'rest' ? 'Resting' : 'Dormant'}
+          </Chip>
+        )}
+      </div>
+
+      <div style={{ marginBottom: 8 }}>
+        <WaterGauge fill={ws.fill} tone={ws.tone} />
+      </div>
+      <div style={{ fontSize: 13, color: C.muted, marginBottom: 20 }}>
+        {plant.lastWatered
+          ? `Last watered ${relDay(plant.lastWatered)} · every ${ws.interval} d`
+          : `Every ${ws.interval} d · no waterings logged yet`}
+        {plant.wateringMethod ? <span style={{ color: C.water }}>{` · Method: ${plant.wateringMethod}`}</span> : ''}
+      </div>
+      <GroupPills groups={plant.groups} />
+
+      {/* Water */}
+      <button
+        onClick={onWater}
+        disabled={wateredToday}
+        style={{
+          width: '100%', padding: '15px 0', borderRadius: 12, border: 'none', marginTop: 16,
+          background: wateredToday ? C.track : C.water,
+          color: wateredToday ? C.muted : '#fff',
+          fontSize: 16, fontWeight: 700, fontFamily: 'inherit',
+          cursor: wateredToday ? 'default' : 'pointer',
+        }}
+      >
+        {wateredToday ? 'Watered today ✓' : '💧 Water now'}
+      </button>
+
+      {/* Feeding block, mirroring the Mac app's panel */}
+      {fs && (
+        <div style={{ background: C.feedPale, borderRadius: 12, padding: '12px 14px', marginTop: 14 }}>
+          <div style={{ fontSize: 13, color: C.feed }}>
+            <strong>🌱 {fs.label}</strong>
+            {plant.lastFert ? ` · last fed ${relDay(plant.lastFert)}` : ''}
+            {` · every ${plant.fertInterval} d`}
+            {plant.fertWinterPause ? ' · paused Nov–Feb' : ''}
           </div>
-          <div style={{ fontSize: 12, color: C.muted }}>days ago</div>
-          <div style={{ fontSize: 11, color: C.muted, marginTop: 4 }}>every {interval}d</div>
-        </div>
-
-        {fs.status !== 'none' && (
-          <div style={{
-            flex: 1, background: C.card, borderRadius: 12, padding: 16,
-            boxShadow: C.cardShadow, textAlign: 'center',
-          }}>
-            <div style={{ fontSize: 11, color: C.muted, marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Feed</div>
-            <div style={{
-              fontSize: 28, fontWeight: 700, fontFamily: "'Fraunces', serif",
-              color: fs.status === 'paused' ? C.muted : fs.status === 'overdue' ? C.overdue : fs.status === 'due' ? '#D4A843' : C.feed,
-            }}>
-              {fs.status === 'paused' ? '❄' : fs.days != null ? fs.days : '?'}
+          {plant.fertNote && <div style={{ fontSize: 12.5, color: C.feed, marginTop: 6 }}>{plant.fertNote}</div>}
+          {rotPreview && (
+            <div style={{ fontSize: 12.5, color: C.feed, marginTop: 6 }}>
+              Next: {rotPreview.next} · then: {rotPreview.then}
             </div>
-            <div style={{ fontSize: 12, color: C.muted }}>{fs.status === 'paused' ? 'winter pause' : 'days ago'}</div>
-            <div style={{ fontSize: 11, color: C.muted, marginTop: 4 }}>every {plant.fertInterval}d</div>
-          </div>
-        )}
-      </div>
-
-      {/* Action buttons */}
-      <div style={{ display: 'flex', gap: 12, marginBottom: 24 }}>
-        <button onClick={onWater} style={{
-          flex: 1, padding: '14px 0', borderRadius: 12, border: 'none',
-          background: C.water, color: '#fff', fontSize: 15, fontWeight: 600,
-          fontFamily: 'inherit', cursor: 'pointer',
-        }}>
-          💧 Water now
-        </button>
-        {fs.status !== 'none' && (
-          <button onClick={onFeed} style={{
-            flex: 1, padding: '14px 0', borderRadius: 12, border: 'none',
-            background: C.feed, color: '#fff', fontSize: 15, fontWeight: 600,
-            fontFamily: 'inherit', cursor: 'pointer',
-          }}>
-            🌱 Fertilize
+          )}
+          <button
+            onClick={onFeed}
+            disabled={fedToday || fs.tone === 'paused'}
+            style={{
+              width: '100%', padding: '13px 0', borderRadius: 10, border: 'none', marginTop: 10,
+              background: fedToday || fs.tone === 'paused' ? C.track : C.feed,
+              color: fedToday || fs.tone === 'paused' ? C.muted : '#fff',
+              fontSize: 15, fontWeight: 700, fontFamily: 'inherit',
+              cursor: fedToday || fs.tone === 'paused' ? 'default' : 'pointer',
+            }}
+          >
+            {fedToday ? 'Fed today ✓' : fs.tone === 'paused' ? 'Feeding paused' : '🌱 Fertilize now'}
           </button>
-        )}
-      </div>
+        </div>
+      )}
 
-      {/* Undo buttons */}
-      <div style={{ display: 'flex', gap: 12, marginBottom: 24 }}>
+      {/* Undo */}
+      <div style={{ display: 'flex', gap: 12, margin: '14px 0 24px' }}>
         {(plant.history || []).length > 0 && (
-          <button onClick={onUndoWater} style={{
-            flex: 1, padding: '10px 0', borderRadius: 10, border: `1px solid ${C.line}`,
-            background: 'transparent', color: C.muted, fontSize: 13,
-            fontFamily: 'inherit', cursor: 'pointer',
-          }}>
-            Undo last watering
-          </button>
+          <button onClick={onUndoWater} style={smallBtn}>Undo last watering</button>
         )}
         {(plant.fertHistory || []).length > 0 && (
-          <button onClick={onUndoFeed} style={{
-            flex: 1, padding: '10px 0', borderRadius: 10, border: `1px solid ${C.line}`,
-            background: 'transparent', color: C.muted, fontSize: 13,
-            fontFamily: 'inherit', cursor: 'pointer',
-          }}>
-            Undo last feed
-          </button>
+          <button onClick={onUndoFeed} style={smallBtn}>Undo last feed</button>
         )}
       </div>
 
       {/* Care info */}
-      {(plant.notes || plant.fertNote || plant.conditions) && (
-        <div style={{ background: C.card, borderRadius: 12, padding: 16, boxShadow: C.cardShadow, marginBottom: 16 }}>
-          <h3 style={{ fontFamily: "'Fraunces', serif", fontSize: 15, fontWeight: 600, margin: '0 0 10px' }}>Care info</h3>
-          {plant.conditions && (
-            <div style={{ fontSize: 13, color: C.muted, marginBottom: 8, lineHeight: 1.6 }}>
-              {plant.conditions.light && <div>☀️ {plant.conditions.light}</div>}
-              {plant.conditions.humidity && <div>💨 {plant.conditions.humidity}</div>}
-              {plant.conditions.temperature && <div>🌡 {plant.conditions.temperature}</div>}
-              {plant.conditions.medium && <div>🪴 {plant.conditions.medium}</div>}
-            </div>
+      {(potSummary || plant.light || plant.humidity || plant.notes || plant.lastRepotted) && (
+        <div style={panel}>
+          <h3 style={{ fontFamily: FONT_DISPLAY, fontSize: 16, fontWeight: 600, margin: '0 0 12px', color: C.ink }}>
+            Care info
+          </h3>
+          {infoRow('Pot & conditions', potSummary)}
+          {plant.lastRepotted && infoRow(
+            'Repotting',
+            `Last repotted ${fmtDate(plant.lastRepotted)} (${relDay(plant.lastRepotted)})${plant.repotNote ? ` — ${plant.repotNote}` : ''}`
           )}
-          {plant.notes && <p style={{ fontSize: 13, color: C.text, margin: '8px 0', lineHeight: 1.5 }}>{plant.notes}</p>}
-          {plant.fertNote && <p style={{ fontSize: 13, color: C.feed, margin: '8px 0', lineHeight: 1.5 }}>🌱 {plant.fertNote}</p>}
+          {infoRow('Light', plant.light)}
+          {infoRow('Humidity', plant.humidity)}
+          {infoRow('Care notes', plant.notes)}
         </div>
       )}
 
-      {/* History */}
-      {(waterHistory.length > 0 || feedHistory.length > 0) && (
-        <div style={{ background: C.card, borderRadius: 12, padding: 16, boxShadow: C.cardShadow }}>
-          <h3 style={{ fontFamily: "'Fraunces', serif", fontSize: 15, fontWeight: 600, margin: '0 0 10px' }}>History</h3>
-          <div style={{ display: 'flex', gap: 24 }}>
-            {waterHistory.length > 0 && (
-              <div style={{ flex: 1 }}>
-                <div style={{ fontSize: 11, color: C.muted, marginBottom: 6, textTransform: 'uppercase' }}>Watered</div>
-                {waterHistory.map((d, i) => (
-                  <div key={i} style={{ fontSize: 13, color: C.text, padding: '3px 0', borderBottom: i < waterHistory.length - 1 ? `1px solid ${C.line}` : 'none' }}>
-                    {formatDate(d)}
-                  </div>
-                ))}
+      {/* One timeline, newest first — same as the Mac app */}
+      <div style={panel}>
+        <h3 style={{ fontFamily: FONT_DISPLAY, fontSize: 16, fontWeight: 600, margin: '0 0 10px', color: C.ink }}>
+          History
+        </h3>
+        {historyEntries.length > 0 ? (
+          <div style={{ fontSize: 13, color: C.ink }}>
+            {historyEntries.map((e, i) => (
+              <div key={e.iso + e.type + i} style={{ padding: '4px 0', borderBottom: `1px dashed ${C.line}` }}>
+                {formatHistoryEntry(e)}
               </div>
-            )}
-            {feedHistory.length > 0 && (
-              <div style={{ flex: 1 }}>
-                <div style={{ fontSize: 11, color: C.muted, marginBottom: 6, textTransform: 'uppercase' }}>Fed</div>
-                {feedHistory.map((d, i) => (
-                  <div key={i} style={{ fontSize: 13, color: C.text, padding: '3px 0', borderBottom: i < feedHistory.length - 1 ? `1px solid ${C.line}` : 'none' }}>
-                    {formatDate(d)}
-                  </div>
-                ))}
-              </div>
-            )}
+            ))}
           </div>
-        </div>
-      )}
+        ) : (
+          <div style={{ fontSize: 13, color: C.muted }}>
+            Nothing logged yet — tap “Water now” or “Fertilize now” as you go.
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -331,7 +284,7 @@ function SkeletonCard() {
   return (
     <div style={{
       width: '100%', padding: '14px 16px', background: C.card, borderRadius: 12,
-      boxShadow: C.cardShadow, display: 'flex', alignItems: 'center', gap: 12,
+      boxShadow: CARD_SHADOW, display: 'flex', alignItems: 'center', gap: 12,
     }}>
       <div style={{ flex: 1 }}>
         <div style={{ width: '60%', height: 14, background: C.line, borderRadius: 4, marginBottom: 6 }} />
@@ -639,20 +592,24 @@ export default function App() {
     }
   };
 
-  // Group plants by location
-  const grouped = {};
-  const sorted = [...plants].sort((a, b) => urgencyScore(b) - urgencyScore(a));
-  for (const p of sorted) {
-    const loc = p.location || 'Unknown';
-    if (!grouped[loc]) grouped[loc] = [];
-    grouped[loc].push(p);
-  }
+  // Flat urgency order with a location header inserted whenever the room
+  // changes — the same walk the Mac app does, so the most urgent plant is
+  // always first rather than buried inside a room bucket.
+  const sorted = [...plants].sort(compareByUrgency);
 
-  const roomOrder = Object.keys(grouped).sort((a, b) => {
-    const maxA = Math.max(...grouped[a].map(urgencyScore));
-    const maxB = Math.max(...grouped[b].map(urgencyScore));
-    return maxB - maxA;
-  });
+  const needsWater = plants.filter((p) => ['overdue', 'due'].includes(waterStatus(p).tone)).length;
+  const needsFeed = plants.filter((p) => fertStatus(p)?.due).length;
+
+  const summary = () => {
+    if (loading && plants.length === 0) return 'Loading your plants…';
+    if (plants.length === 0) return 'Your houseplant watering & feeding log';
+    const bits = [];
+    if (needsWater > 0) bits.push(`${needsWater} need${needsWater === 1 ? 's' : ''} water`);
+    if (needsFeed > 0) bits.push(`${needsFeed} need${needsFeed === 1 ? 's' : ''} feeding`);
+    return bits.length
+      ? `${bits.join(' · ')} (of ${plants.length} plants).`
+      : `All ${plants.length} plants are looked after. 🌿`;
+  };
 
   if (selectedPlant) {
     const current = plants.find(p => p.id === selectedPlant.id) || selectedPlant;
@@ -683,13 +640,13 @@ export default function App() {
         background: C.bg,
       }}>
         <h1 style={{
-          fontFamily: "'Fraunces', serif", fontSize: 28, fontWeight: 700,
-          margin: 0, color: C.text,
+          fontFamily: FONT_DISPLAY, fontSize: 30, fontWeight: 600,
+          margin: 0, color: C.pine, lineHeight: 1.1,
         }}>
           Kastelu
         </h1>
-        <p style={{ fontSize: 12, color: C.muted, margin: '2px 0 0' }}>
-          {plants.length} plant{plants.length !== 1 ? 's' : ''}
+        <p style={{ fontSize: 13, color: C.muted, margin: '4px 0 0' }}>
+          {summary()}
           {syncing && ' · syncing…'}
         </p>
       </div>
@@ -705,7 +662,7 @@ export default function App() {
             Sign in with Google
           </button>
           {!import.meta.env.VITE_GOOGLE_CLIENT_ID && (
-            <p style={{ fontSize: 12, color: C.overdue, marginTop: 8, textAlign: 'center' }}>
+            <p style={{ fontSize: 12, color: C.rust, marginTop: 8, textAlign: 'center' }}>
               VITE_GOOGLE_CLIENT_ID not set — add it to .env
             </p>
           )}
@@ -727,7 +684,7 @@ export default function App() {
             style={{
               display: 'block', width: '100%', textAlign: 'left',
               padding: '10px 14px', borderRadius: 10, border: 'none',
-              background: '#FEF2F0', color: C.overdue, fontSize: 13,
+              background: C.rustPale, color: C.rust, fontSize: 13,
               fontFamily: 'inherit', cursor: 'pointer',
             }}
           >
@@ -743,24 +700,30 @@ export default function App() {
         </div>
       )}
 
-      {/* Plant list grouped by room */}
-      <div style={{ padding: '0 16px' }}>
-        {roomOrder.map(room => (
-          <div key={room} style={{ marginBottom: 20 }}>
-            <h2 style={{
-              fontFamily: "'Fraunces', serif", fontSize: 14, fontWeight: 600,
-              color: C.muted, margin: '0 0 8px', textTransform: 'uppercase',
-              letterSpacing: '0.04em',
-            }}>
-              {room}
-            </h2>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              {grouped[room].map(plant => (
-                <PlantCard key={plant.id} plant={plant} onTap={setSelectedPlant} />
-              ))}
-            </div>
-          </div>
-        ))}
+      {/* Urgency order, with a header each time the room changes */}
+      <div style={{ padding: '0 16px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+        {(() => {
+          let lastRoom = null;
+          return sorted.map((plant) => {
+            const room = locationGroup(plant.location);
+            const showHeader = room !== lastRoom;
+            lastRoom = room;
+            return (
+              <div key={plant.id}>
+                {showHeader && (
+                  <h2 style={{
+                    fontFamily: FONT_DISPLAY, fontSize: 14, fontWeight: 600,
+                    color: C.muted, margin: '10px 0 8px', textTransform: 'uppercase',
+                    letterSpacing: '0.04em',
+                  }}>
+                    {room}
+                  </h2>
+                )}
+                <PlantCard plant={plant} onTap={setSelectedPlant} />
+              </div>
+            );
+          });
+        })()}
       </div>
 
       {/* Bottom status bar */}
@@ -781,7 +744,7 @@ export default function App() {
         <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
           <span style={{
             width: 6, height: 6, borderRadius: '50%',
-            background: online ? C.feed : C.overdue,
+            background: online ? C.feed : C.rust,
           }} />
           {online ? 'Online' : 'Offline'}
         </span>
