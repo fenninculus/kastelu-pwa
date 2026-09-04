@@ -1,11 +1,19 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
-  <rect width="512" height="512" rx="96" fill="#EDF1EA"/>
-  <g transform="translate(256,280)">
-    <!-- Water droplet -->
-    <path d="M-10,-120 C-10,-120 -70,0 -70,50 C-70,83 -43,110 -10,110 C23,110 50,83 50,50 C50,0 -10,-120 -10,-120Z" fill="#5B8FA3" opacity="0.9"/>
-    <!-- Leaf -->
-    <path d="M10,-60 C10,-60 80,-40 100,20 C120,80 80,110 40,100 C40,100 70,60 50,10 C30,-40 10,-60 10,-60Z" fill="#6B8F4E" opacity="0.9"/>
-    <!-- Leaf vein -->
-    <path d="M20,-40 C35,-10 55,30 42,85" stroke="#EDF1EA" stroke-width="3" fill="none" opacity="0.6"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Kastelu">
+  <!-- Matches the macOS app icon (kastelu/build/icon.icns): pine ground, pale droplet, leaf inside -->
+  <rect width="512" height="512" rx="96" fill="#2E5339"/>
+  <circle cx="256" cy="256" r="136" fill="#345D40"/>
+
+  <!-- droplet -->
+  <path d="M256 145 C256 145 326 250 326 288 A70 70 0 0 1 186 288 C186 250 256 145 256 145 Z" fill="#CBDFE2"/>
+  <ellipse cx="222" cy="254" rx="13" ry="21" fill="#FFFFFF" opacity="0.35"/>
+  <ellipse cx="256" cy="326" rx="42" ry="9" fill="none" stroke="#A9C6CE" stroke-width="3"/>
+
+  <!-- leaf -->
+  <path d="M247 265 C231 225 245 185 284 171 C303 203 292 247 247 265 Z" fill="#8FBF7A"/>
+  <g stroke="#6F9E5C" stroke-width="3" fill="none" stroke-linecap="round" opacity="0.75">
+    <path d="M247 265 C258 232 268 202 284 171"/>
+    <path d="M255 243 L273 238"/>
+    <path d="M262 222 L278 216"/>
+    <path d="M269 201 L281 195"/>
   </g>
 </svg>
