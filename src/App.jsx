@@ -32,6 +32,10 @@ function normalizePlant(p) {
     fertInterval: p.fertInterval ?? p.feeding?.intervalDays ?? 0,
     fertWinterPause: p.fertWinterPause ?? p.feeding?.winterPause ?? true,
     fertNote: p.fertNote || p.feeding?.fertNote || '',
+    // the Mac app nests these under `feeding`; without the fallback the
+    // rotation preview never renders
+    fertRotation: p.fertRotation || p.feeding?.fertRotation || null,
+    fertRotationIndex: p.fertRotationIndex ?? p.feeding?.fertRotationIndex ?? 0,
     botanical: p.botanical || '',
     notes: p.notes || p.care?.notes || '',
     // Keep the Mac app's two shapes apart: `conditions` is the pot (size,
