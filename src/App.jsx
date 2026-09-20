@@ -51,6 +51,42 @@ function normalizePlant(p) {
   };
 }
 
+// Patch the Drive file's records with whatever this phone knows that is newer:
+// per plant, per field (watering and feeding separately), newest wins. Only
+// the dates and their history move; everything else stays as the Mac app
+// wrote it, because the Mac is where plants are edited. Returns the merged
+// list and the names of plants that changed, so callers know whether the
+// file has to be written.
+function mergeNewerLocal(remotePlants, localPlants) {
+  const localMap = new Map(localPlants.map(p => [p.id || p.name, p]));
+  const changed = [];
+  const plants = remotePlants.map(rp => {
+    const local = localMap.get(rp.id || rp.name);
+    if (!local) return rp;
+    const out = { ...rp };
+    const localWatered = local.lastWatered || local.watering?.lastWatered || null;
+    const remoteWatered = rp.lastWatered || rp.watering?.lastWatered || null;
+    const localFed = local.lastFert || local.feeding?.lastFed || null;
+    const remoteFed = rp.lastFert || rp.feeding?.lastFed || null;
+    let touched = false;
+    if (localWatered && (!remoteWatered || localWatered > remoteWatered)) {
+      out.lastWatered = localWatered;
+      if ((local.history || []).length) out.history = local.history;
+      if (out.watering) out.watering = { ...out.watering, lastWatered: localWatered };
+      touched = true;
+    }
+    if (localFed && (!remoteFed || localFed > remoteFed)) {
+      out.lastFert = localFed;
+      if ((local.fertHistory || []).length) out.fertHistory = local.fertHistory;
+      if (out.feeding) out.feeding = { ...out.feeding, lastFed: localFed };
+      touched = true;
+    }
+    if (touched) changed.push(rp.name);
+    return out;
+  });
+  return { plants, changed };
+}
+
 function PlantCard({ plant, onTap }) {
   const ws = waterStatus(plant);
   const fs = fertStatus(plant);
@@ -344,9 +380,22 @@ export default function App() {
     setSyncing(true);
     setError(null);
     try {
-      const data = await readPlantData();
+      const remote = await readPlantData();
+      // Merge, never replace. The Mac app can upload a stale copy of the file
+      // (Google Drive for desktop lags the cloud after a boot — Sep 2026 it
+      // buried two days of phone waterings that way). If this phone knows a
+      // newer watering or feeding than the file does, the file is wrong, not
+      // the phone: write the newer entries back instead of adopting the loss.
+      const cached = await getPlants();
+      const { plants: mergedPlants, changed } = mergeNewerLocal(remote.plants || [], cached);
+      let data = remote;
+      if (changed.length) {
+        console.log('[Drive sync] Drive is behind this phone for', changed.join(', '), '— writing back');
+        data = { ...remote, plants: mergedPlants, exportedAt: new Date().toISOString() };
+        await writePlantData(data);
+      }
       setFullData(data);
-      const plantList = (data.plants || []).map(normalizePlant);
+      const plantList = mergedPlants.map(normalizePlant);
       setPlants(plantList);
       await savePlants(plantList);
       const now = new Date();
@@ -355,8 +404,6 @@ export default function App() {
       setAuthed(true);
       await clearPendingChanges();
       try { lastModifiedRef.current = await getFileModifiedTime(); } catch {}
-
-
     } catch (e) {
       console.error('Sync failed:', e);
       setError(e.message);
@@ -375,27 +422,7 @@ export default function App() {
     const latest = pending[pending.length - 1];
     try {
       const remote = await readPlantData();
-      const localMap = Object.fromEntries(
-        latest.plants.map(p => [p.id || p.name, p])
-      );
-      const mergedPlants = (remote.plants || []).map(rp => {
-        const id = rp.id || rp.name;
-        const local = localMap[id];
-        if (!local) return rp;
-        const localWatered = local.lastWatered || local.watering?.lastWatered;
-        const remoteWatered = rp.lastWatered || rp.watering?.lastWatered;
-        const localFed = local.lastFert || local.feeding?.lastFed;
-        const remoteFed = rp.lastFert || rp.feeding?.lastFed;
-        if ((localWatered && (!remoteWatered || localWatered > remoteWatered)) ||
-            (localFed && (!remoteFed || localFed > remoteFed))) {
-          const out = { ...local };
-          delete out._normalized;
-          if (out.watering) out.watering = { ...out.watering, lastWatered: out.lastWatered || out.watering.lastWatered };
-          if (out.feeding) out.feeding = { ...out.feeding, lastFed: out.lastFert || out.feeding.lastFed };
-          return out;
-        }
-        return rp;
-      });
+      const { plants: mergedPlants } = mergeNewerLocal(remote.plants || [], latest.plants);
       const data = { ...remote, plants: mergedPlants, exportedAt: new Date().toISOString() };
       await writePlantData(data);
       setFullData(data);
@@ -438,28 +465,10 @@ export default function App() {
     }
     try {
       const remote = await readPlantData();
-      const changedMap = Object.fromEntries(
-        updatedPlants.filter(p => changedIds.includes(p.id)).map(p => [p.id, p])
+      const { plants: mergedPlants } = mergeNewerLocal(
+        remote.plants || [],
+        updatedPlants.filter(p => changedIds.includes(p.id)),
       );
-      const mergedPlants = (remote.plants || []).map(rp => {
-        const id = rp.id || rp.name;
-        const local = changedMap[id];
-        if (!local) return rp;
-        const out = { ...rp };
-        const remoteWatered = rp.lastWatered || rp.watering?.lastWatered || null;
-        const remoteFed = rp.lastFert || rp.feeding?.lastFed || null;
-        if (local.lastWatered && (!remoteWatered || local.lastWatered > remoteWatered)) {
-          out.lastWatered = local.lastWatered;
-          out.history = local.history;
-          if (out.watering) out.watering = { ...out.watering, lastWatered: local.lastWatered };
-        }
-        if (local.lastFert && (!remoteFed || local.lastFert > remoteFed)) {
-          out.lastFert = local.lastFert;
-          out.fertHistory = local.fertHistory;
-          if (out.feeding) out.feeding = { ...out.feeding, lastFed: local.lastFert };
-        }
-        return out;
-      });
       const data = { ...remote, plants: mergedPlants, exportedAt: new Date().toISOString() };
       console.log('[Drive] Writing merged data to Drive...');
       await writePlantData(data);
