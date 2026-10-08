@@ -79,6 +79,14 @@ function mergeNewerLocal(remotePlants, localPlants) {
       out.lastFert = localFed;
       if ((local.fertHistory || []).length) out.fertHistory = local.fertHistory;
       if (out.feeding) out.feeding = { ...out.feeding, lastFed: localFed };
+      // A feed logged here steps the rotation, so the file must carry the new
+      // position too or the next sync puts the old "next" fertilizer back.
+      const rot = local.fertRotation || rp.fertRotation || rp.feeding?.fertRotation;
+      if (rot && rot.length >= 2) {
+        const idx = local.fertRotationIndex ?? 0;
+        out.fertRotationIndex = idx;
+        if (out.feeding) out.feeding = { ...out.feeding, fertRotationIndex: idx, nextFert: rot[(idx + 1) % rot.length] };
+      }
       touched = true;
     }
     if (touched) changed.push(rp.name);
@@ -509,10 +517,16 @@ export default function App() {
   const doFeed = async (plant) => {
     console.log('[Action] Fertilize now:', plant.name);
     const now = new Date().toISOString();
+    // Same shape as the Mac app's logFert: step the rotation and record which
+    // fertilizer this feed used.
+    const rot = plant.fertRotation;
+    const hasRotation = rot && rot.length >= 2;
+    const newIdx = hasRotation ? ((plant.fertRotationIndex ?? 0) + 1) % rot.length : (plant.fertRotationIndex ?? 0);
     const updated = {
       ...plant,
       lastFert: now,
-      fertHistory: [...(plant.fertHistory || []), now],
+      fertHistory: [...(plant.fertHistory || []), hasRotation ? { iso: now, fert: rot[newIdx] } : now],
+      fertRotationIndex: newIdx,
     };
     const newPlants = plants.map(p => p.id === plant.id ? updated : p);
     setPlants(newPlants);
@@ -543,10 +557,16 @@ export default function App() {
     console.log('[Action] Undo feed:', plant.name);
     const fertHistory = [...(plant.fertHistory || [])];
     fertHistory.pop();
+    const last = fertHistory.length > 0 ? fertHistory[fertHistory.length - 1] : null;
+    const rot = plant.fertRotation;
+    const hasRotation = rot && rot.length >= 2;
     const updated = {
       ...plant,
-      lastFert: fertHistory.length > 0 ? fertHistory[fertHistory.length - 1] : null,
+      lastFert: last ? (typeof last === 'string' ? last : last.iso) : null,
       fertHistory,
+      fertRotationIndex: hasRotation
+        ? ((plant.fertRotationIndex ?? 0) - 1 + rot.length) % rot.length
+        : (plant.fertRotationIndex ?? 0),
     };
     const newPlants = plants.map(p => p.id === plant.id ? updated : p);
     setPlants(newPlants);
