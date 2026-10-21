@@ -12,7 +12,7 @@ import {
   C, FONT_DISPLAY,
   waterStatus, fertStatus, compareByUrgency, locationGroup,
   daysSince, relDay, fmtDate,
-  conditionsSummary, fertRotationPreview, buildUnifiedHistory, formatHistoryEntry,
+  conditionsSummary, fertRotationPreview, buildUnifiedHistory, formatHistoryEntry, halveDoses,
   WaterGauge, Chip, StatusBadge, GroupPills,
 } from './kastelu-ui.jsx';
 
@@ -253,13 +253,16 @@ function PlantDetail({ plant, onBack, onWater, onFeed, onUndoWater, onUndoFeed }
           <div style={{ fontSize: 13, color: C.feed }}>
             <strong>🌱 {fs.label}</strong>
             {plant.lastFert ? ` · last fed ${relDay(plant.lastFert)}` : ''}
-            {` · every ${plant.fertInterval} d`}
-            {plant.fertWinterPause ? ' · paused Nov–Feb' : ''}
+            {fs.interval ? ` · every ${fs.interval} d` : ''}
           </div>
-          {plant.fertNote && <div style={{ fontSize: 12.5, color: C.feed, marginTop: 6 }}>{plant.fertNote}</div>}
+          {plant.fertNote && (
+            <div style={{ fontSize: 12.5, color: C.feed, marginTop: 6 }}>
+              {fs.half ? <><strong>Half strength:</strong> {halveDoses(plant.fertNote)}</> : plant.fertNote}
+            </div>
+          )}
           {rotPreview && (
             <div style={{ fontSize: 12.5, color: C.feed, marginTop: 6 }}>
-              Next: {rotPreview.next} · then: {rotPreview.then}
+              Next: {fs.half ? halveDoses(rotPreview.next) : rotPreview.next} · then: {fs.half ? halveDoses(rotPreview.then) : rotPreview.then}
             </div>
           )}
           <button

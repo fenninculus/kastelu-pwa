@@ -111,30 +111,46 @@ export function waterStatus(p) {
   return { label: `Water in ${daysLeft} d`, tone: "ok", daysLeft, fill, interval };
 }
 
+// Feeding follows the Mac app's seasonal schedule (Oct 2026): the export
+// carries this season's interval, whether feeding is paused (season or
+// lifecycle) and whether it is at half strength, so the phone takes those as
+// they are. Days left is still recomputed here. An export from before the
+// seasonal update has none of these and falls back to the old Nov–Feb pause.
 export function fertStatus(p) {
   if (!p.fertInterval || p.fertInterval <= 0) return null;
+  const f = p.feeding || {};
+  const seasonal = f.paused !== undefined;
 
-  // A resting or dormant plant can have feeding paused by lifecycle overrides
-  // that the export does not carry, so trust the Mac app's own verdict there.
-  const lc = p.lifecycle || "active";
-  if (lc !== "active" && p.feeding?.status === "paused") {
-    const stateLabel = lc === "rest" ? "resting" : "dormant";
-    return {
-      label: p.feeding.label || `Feeding paused (${stateLabel})`,
-      tone: "paused",
-      due: false,
-      daysLeft: Infinity,
-    };
+  if (seasonal ? f.paused : (p.lifecycle || "active") !== "active" && f.status === "paused") {
+    return { label: f.label || "Feeding paused", tone: "paused", due: false, daysLeft: Infinity };
   }
-  if (p.fertWinterPause && isWinterNow())
+  if (!seasonal && p.fertWinterPause && isWinterNow())
     return { label: "Feeding paused for winter", tone: "paused", due: false, daysLeft: Infinity };
 
+  const interval = (seasonal && f.effectiveIntervalDays) || p.fertInterval;
+  const half = seasonal && !!f.halfStrength;
   const since = daysSince(p.lastFert);
-  if (since === null) return { label: "No feeds logged yet", tone: "due", due: true, daysLeft: 0 };
-  const daysLeft = p.fertInterval - since;
-  if (daysLeft < 0) return { label: `Feed overdue by ${-daysLeft} d`, tone: "due", due: true, daysLeft };
-  if (daysLeft === 0) return { label: "Feed today", tone: "due", due: true, daysLeft: 0 };
-  return { label: `Feed in ${daysLeft} d`, tone: "ok", due: false, daysLeft };
+  if (since === null) return { label: "No feeds logged yet", tone: "due", due: true, daysLeft: 0, interval, half };
+  const daysLeft = interval - since;
+  if (daysLeft < 0) return { label: `Feed overdue by ${-daysLeft} d`, tone: "due", due: true, daysLeft, interval, half };
+  if (daysLeft === 0) return { label: "Feed today", tone: "due", due: true, daysLeft: 0, interval, half };
+  return { label: `Feed in ${daysLeft} d`, tone: "ok", due: false, daysLeft, interval, half };
+}
+
+// Same as the Mac app's src/seasons.js: every teaspoon amount halved,
+// rounded down to ⅛ tsp, for feeds at half strength this season.
+const FRACTIONS = { "½": 1 / 2, "⅓": 1 / 3, "⅔": 2 / 3, "¼": 1 / 4, "¾": 3 / 4, "⅛": 1 / 8, "⅜": 3 / 8, "⅝": 5 / 8, "⅞": 7 / 8 };
+const EIGHTHS = ["", "⅛", "¼", "⅜", "½", "⅝", "¾", "⅞"];
+const DOSE_RE = /(\d+(?:\.\d+)?)?([½⅓⅔¼¾⅛⅜⅝⅞])?(\s*tsp)/g;
+
+export function halveDoses(text) {
+  if (!text) return text;
+  return text.replace(DOSE_RE, (match, num, frac, unit) => {
+    if (!num && !frac) return match;
+    const n = Math.floor(((num ? Number(num) : 0) + (frac ? FRACTIONS[frac] : 0)) / 2 * 8 + 1e-9);
+    if (n === 0) return `<⅛${unit}`;
+    return `${Math.floor(n / 8) || ""}${EIGHTHS[n % 8]}${unit}`;
+  });
 }
 
 // Same ordering as the Mac app: overdue first, then due, then by days left.
