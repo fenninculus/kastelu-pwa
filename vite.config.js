@@ -1,9 +1,19 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import { VitePWA } from 'vite-plugin-pwa';
+import { execSync } from 'node:child_process';
+
+// Shown in the bottom bar, so the phone can tell which build it is running:
+// a freshly deployed version only takes over on the next app start.
+let commit = 'dev';
+try { commit = execSync('git rev-parse --short HEAD').toString().trim(); } catch {}
 
 export default defineConfig({
   base: '/kastelu-pwa/',
+  define: {
+    __BUILD_COMMIT__: JSON.stringify(commit),
+    __BUILD_TIME__: JSON.stringify(new Date().toISOString()),
+  },
   plugins: [
     react(),
     VitePWA({

@@ -16,6 +16,11 @@ import {
   WaterGauge, Chip, StatusBadge, GroupPills,
 } from './kastelu-ui.jsx';
 
+// "21 Oct 21.07": the day matters — a time alone can't tell today's sync
+// from last week's
+const fmtStamp = (d) =>
+  `${d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })} ${d.toLocaleTimeString('fi-FI', { hour: '2-digit', minute: '2-digit' })}`;
+
 const CARD_SHADOW = '0 1px 3px rgba(34,48,31,0.08)';
 
 function normalizePlant(p) {
@@ -775,8 +780,9 @@ export default function App() {
         zIndex: 20,
       }}>
         <span>
-          {lastSync ? `Synced ${lastSync.toLocaleTimeString('fi-FI', { hour: '2-digit', minute: '2-digit' })}` : 'Not synced'}
+          {lastSync ? `Synced ${fmtStamp(lastSync)}` : 'Not synced'}
         </span>
+        <span>Build {fmtStamp(new Date(__BUILD_TIME__))} · {__BUILD_COMMIT__}</span>
         <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
           <span style={{
             width: 6, height: 6, borderRadius: '50%',
