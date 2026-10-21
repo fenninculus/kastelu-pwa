@@ -252,6 +252,13 @@ function PlantDetail({ plant, onBack, onWater, onFeed, onUndoWater, onUndoFeed }
         {wateredToday ? 'Watered today ✓' : '💧 Water now'}
       </button>
 
+      {/* Feeding off (interval 0, e.g. a HOLD): the note alone, as on the Mac */}
+      {!fs && plant.fertNote && (
+        <div style={{ background: C.feedPale, borderRadius: 12, padding: '12px 14px', marginTop: 14, fontSize: 12.5, color: C.feed }}>
+          🌱 {plant.fertNote}
+        </div>
+      )}
+
       {/* Feeding block, mirroring the Mac app's panel */}
       {fs && (
         <div style={{ background: C.feedPale, borderRadius: 12, padding: '12px 14px', marginTop: 14 }}>
